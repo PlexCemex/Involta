@@ -73,6 +73,7 @@ func main() {
 
 			if err := svc.Process(ctx, msg.Value); err != nil {
 				log.Printf("process error: %v", err)
+				return
 			}
 
 			if err := r.CommitMessages(ctx, msg); err != nil {

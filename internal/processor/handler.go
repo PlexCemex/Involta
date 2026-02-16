@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"involta/internal/models"
-	"involta/internal/storage"
 	"log"
 	"math"
 	"math/rand"
@@ -20,7 +19,8 @@ var (
 )
 
 type Repository interface {
-	SaveEvent(ctx context.Context, eventID string) error
+	StartProcessing(ctx context.Context, eventID string) (bool, error)
+	MarkDone(ctx context.Context, eventID string) error
 }
 
 type Service struct {
@@ -66,12 +66,12 @@ func (s *Service) Process(ctx context.Context, val []byte) error {
 		return nil
 	}
 
-	if err := s.repo.SaveEvent(ctx, e.EventID); err != nil {
-		if errors.Is(err, storage.ErrDuplicate) {
-			log.Printf("Duplicate event, skipping: %s", e.EventID)
-			return nil
-		}
+	shouldProcess, err := s.repo.StartProcessing(ctx, e.EventID)
+	if err != nil {
 		return err
+	}
+	if !shouldProcess {
+		return nil
 	}
 
 	var chans []string
@@ -83,7 +83,7 @@ func (s *Service) Process(ctx context.Context, val []byte) error {
 	case "order_shipped":
 		chans = []string{"push", "sms"}
 	default:
-		return nil
+		return s.repo.MarkDone(ctx, e.EventID)
 	}
 
 	for _, ch := range chans {
@@ -92,5 +92,5 @@ func (s *Service) Process(ctx context.Context, val []byte) error {
 		}
 	}
 
-	return nil
+	return s.repo.MarkDone(ctx, e.EventID)
 }
