@@ -29,7 +29,7 @@ func main() {
 	}
 	defer store.Close()
 
-	if err := store.Setup(); err != nil {
+	if err := store.Setup(context.Background()); err != nil {
 		log.Fatal("Migration error:", err)
 	}
 
