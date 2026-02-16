@@ -35,16 +35,16 @@ func (s *Service) send(channel, msg string) error {
 	r := rand.Float64()
 	if r < 0.01 {
 		return ErrPerm
-	} // 1% fatal
+	}
 	if r < 0.11 {
 		return ErrTemp
-	} // 10% temp
+	}
 	log.Printf("[SENT %s] %s", channel, msg)
 	return nil
 }
 
 func (s *Service) tryDeliver(channel string, e models.Event) error {
-	for i := 0; i <= 3; i++ {
+	for i := range 4 {
 		err := s.send(channel, fmt.Sprintf("%s user:%d", e.EventType, e.UserID))
 		if err == nil {
 			return nil

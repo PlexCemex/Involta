@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,9 +18,10 @@ import (
 )
 
 const (
-	broker = "localhost:9092"
-	topic  = "user-events"
-	dsn    = "postgres://user:password@localhost:5432/notifications?sslmode=disable"
+	broker      = "localhost:9092"
+	topic       = "user-events"
+	dsn         = "postgres://user:password@localhost:5432/notifications?sslmode=disable"
+	concurrency = 10
 )
 
 func main() {
@@ -48,31 +50,42 @@ func main() {
 
 	go produceMockData(ctx)
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+
 	for {
 		m, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				break
 			}
-			log.Printf("Kafka connection error: %v", err)
+			log.Printf("fetch error: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if err := svc.Process(ctx, m.Value); err != nil {
-			log.Printf("Processing error: %v", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
+		sem <- struct{}{}
+		wg.Add(1)
 
-		if err := r.CommitMessages(ctx, m); err != nil {
-			log.Printf("Commit error: %v", err)
-		}
+		go func(msg kafka.Message) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := svc.Process(ctx, msg.Value); err != nil {
+				log.Printf("process error: %v", err)
+			}
+
+			if err := r.CommitMessages(ctx, msg); err != nil {
+				log.Printf("commit error: %v", err)
+			}
+		}(m)
 	}
+
+	wg.Wait()
 }
 
 func produceMockData(ctx context.Context) {
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	w := &kafka.Writer{
 		Addr:     kafka.TCP(broker),
@@ -82,7 +95,6 @@ func produceMockData(ctx context.Context) {
 	defer w.Close()
 
 	events := []string{"order_created", "payment_received", "order_shipped"}
-	log.Println("Generator started")
 
 	for i := range 10 {
 		select {
@@ -95,7 +107,6 @@ func produceMockData(ctx context.Context) {
 			}
 
 			eventID := uuid.New().String()
-
 			msg := fmt.Sprintf(`{"event_id":"%s","user_id":%d,"event_type":"%s","payload":%s}`,
 				eventID, 100+i, events[rand.Intn(len(events))], payload)
 
@@ -107,8 +118,7 @@ func produceMockData(ctx context.Context) {
 			}
 			log.Printf("Sent event %d (ID: %s)", i, eventID)
 
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	log.Println("Generator finished")
 }
