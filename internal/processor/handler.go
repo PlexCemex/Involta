@@ -19,12 +19,16 @@ var (
 	ErrStopRetry = errors.New("stop retry")
 )
 
-type Service struct {
-	store *storage.DB
+type Repository interface {
+	SaveEvent(ctx context.Context, eventID string) error
 }
 
-func New(s *storage.DB) *Service {
-	return &Service{store: s}
+type Service struct {
+	repo Repository
+}
+
+func New(r Repository) *Service {
+	return &Service{repo: r}
 }
 
 func (s *Service) send(channel, msg string) error {
@@ -62,7 +66,11 @@ func (s *Service) Process(ctx context.Context, val []byte) error {
 		return nil
 	}
 
-	if dup, err := s.store.IsDuplicate(ctx, e.EventID); err != nil || dup {
+	if err := s.repo.SaveEvent(ctx, e.EventID); err != nil {
+		if errors.Is(err, storage.ErrDuplicate) {
+			log.Printf("Duplicate event, skipping: %s", e.EventID)
+			return nil
+		}
 		return err
 	}
 
@@ -84,5 +92,5 @@ func (s *Service) Process(ctx context.Context, val []byte) error {
 		}
 	}
 
-	return s.store.Save(ctx, e.EventID)
+	return nil
 }
